@@ -129,37 +129,67 @@ void helper(const vector<fs::path> &dirs) {
         }
     }
 }
+
 void indexer(const fs::directory_entry &ent) {
     const string &path = ent.path().string();
     string fileName = path.substr(path.find_last_of('\\') + 1);
+    rj::Document tempDoc;
+    tempDoc.SetObject();
+    rj::Document::AllocatorType& tempAllocator = tempDoc.GetAllocator();
     rj::Value *loc_data;
     int ix = fileName.find_last_of('.');
-    std::lock_guard<std::mutex> guard(data_mutex);  // Lock the mutex to protect DATA
-
+    std::lock_guard<std::mutex> guard(data_mutex);
     if (!fs::is_directory(ent.status()) && ix != string::npos) {
-        loc_data = &extData;
-
+        loc_data = &tempDoc;
         for (int i = ix + 1; i < fileName.size(); i++) {
             string chr(1, fileName[i]);
             if (!isalnum(fileName[i])) {
                 continue;
             }
             if (!loc_data->HasMember(chr.c_str())) {
-                loc_data->AddMember(rj::Value(chr.c_str(), extDataAllocator), rj::Value(rj::kObjectType), extDataAllocator);
+                loc_data->AddMember(rj::Value(chr.c_str(), tempAllocator), rj::Value(rj::kObjectType), tempAllocator);
             }
-            loc_data = &(*loc_data)[chr.c_str()];  // Update loc_data to point to the nested object
+            loc_data = &(*loc_data)[chr.c_str()];
             if (i == fileName.size() - 1) {
                 if (!loc_data->HasMember("END")) {
                     rj::Value endArray(rj::kArrayType);
-                    loc_data->AddMember("END", endArray, extDataAllocator);
+                    loc_data->AddMember("END", endArray, tempAllocator);
                 }
-                loc_data->FindMember("END")->value.PushBack(rj::Value().SetString(path.c_str(), extDataAllocator), extDataAllocator);  // Modify DATA directly
+                loc_data->FindMember("END")->value.PushBack(rj::Value().SetString(path.c_str(), tempAllocator), tempAllocator);
             }
         }
+        rj::StringBuffer buffer;
+        rj::Writer<rj::StringBuffer> writer(buffer);
+        tempDoc.Accept(writer);
+        fprintf(extFile, buffer.GetString());
     }
     fileName = fileName.substr(0, ix);
-    loc_data = &fileData;  // Use a pointer to json to modify DATA directly
-
+    tempDoc.SetObject();
+    loc_data = &tempDoc;
+    for (int i = 0; i < fileName.size(); i++) {
+        if (!isalnum(fileName[i])) {
+            continue;
+        }
+        string chr(1, tolower(fileName[i]));
+        if (!loc_data->HasMember(chr.c_str())) {
+            loc_data->AddMember(rj::Value(chr.c_str(), tempAllocator), rj::Value(rj::kObjectType), tempAllocator);
+        }
+        loc_data = &((*loc_data)[chr.c_str()]);
+        if (i == fileName.size() - 1) {
+            if (!loc_data->HasMember("END")) {
+                rj::Value endArray(rj::kArrayType);
+                loc_data->AddMember("END", endArray, tempAllocator);
+            }
+            loc_data->FindMember("END")->value.PushBack(rj::Value().SetString(path.c_str(), tempAllocator), tempAllocator);
+        }
+    }
+    rj::StringBuffer buffer;
+    rj::Writer<rj::StringBuffer> writer(buffer);
+    tempDoc.Accept(writer);
+    fprintf(jsonFile, buffer.GetString());
+}
+    fileName = fileName.substr(0, ix);
+    loc_data = &fileData;
     for (int i = 0; i < fileName.size(); i++) {
         if (!isalnum(fileName[i])) {
             continue;
